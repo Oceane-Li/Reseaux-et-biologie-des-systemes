@@ -1,0 +1,293 @@
+---
+title: "TraitementDonneesMETABRIC"
+output: html_document
+date: "2024-10-26"
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(dplyr)
+library(tidyr)
+```
+
+```{r}
+METABRIC_Data <- read_csv("METABRIC_RNA_Mutation.csv")
+View(METABRIC_Data)
+```
+
+```{r}
+remplacer_na <- function(data) {
+  for (col_name in colnames(data)) { #parcourir chaque colonne du tableau donné
+    if (is.numeric(data[[col_name]])) { #vérifier si la var est quantitative continue
+      median_value <- median(data[[col_name]], na.rm = TRUE) #médiane
+      data[[col_name]][is.na(data[[col_name]])] <- median_value
+    } else {
+      data <- data[!is.na(data[[col_name]]), ] #suppression des lignes avec NA si la variable de la colonne n'est pas quantitative continue
+    }
+  }
+  return(data)
+}
+```
+
+
+```{r}
+convert_column_to_binary <- function(column){
+    "Convertit un vecteur en une matrice remplie de zeros et de uns"
+    type_cancer <- unique(na.omit(column)) #éléments uniques (sans compter les NA)
+    new_columns <- matrix(0, nrow = length(column), ncol = length(type_cancer)) #nouvelle matrice de 0
+    colnames(new_columns) <- type_cancer #mettre dans le header les types de cancer
+    
+    for (i in 1:length(column)){
+        if (!is.na(column[i])){ #vérifier qu'on a pas de NA dans la colonne
+            for (j in 1:length(type_cancer)){
+                if (column[i] == type_cancer[j]){
+                    new_columns[i, j] <- 1
+                }
+            }
+        }
+    }
+    return(new_columns)
+}
+
+#convert_column_to_binary(METABRIC_Data$cancer_type_detailed)
+```
+
+# Sélection de quelques features clefs (première exploration)
+
+```{r}
+#Sélectionner les colonnes d'expression des gènes (32 à 520) et prendre les gènes les plus variables
+gene_expression_data <- METABRIC_Data[, 32:520]
+variances <- apply(gene_expression_data, 2, var)
+top_genes_ind <- order(variances, decreasing = TRUE)[1:60]
+top_genes <- gene_expression_data[, top_genes_ind]
+
+cancer_type_binary <- convert_column_to_binary(METABRIC_Data$cancer_type_detailed)
+
+final_data <- cbind(top_genes, cancer_type_binary)
+
+final_data <- remplacer_na(final_data)
+
+write.csv(final_data, "60HVgenes_CancerType.csv", row.names = FALSE)
+```
+
+```{r}
+age <- METABRIC_Data$age_at_diagnosis
+final_data <- cbind(top_genes, age)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "60HVgenes_Age.csv", row.names = FALSE)
+```
+
+```{r}
+cellularity_binary <- convert_column_to_binary(METABRIC_Data$cellularity)
+final_data <- cbind(top_genes, cellularity_binary)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "60HVgenes_Cellularity.csv", row.names = FALSE)
+```
+
+```{r}
+er_status_binary <- convert_column_to_binary(METABRIC_Data$er_status)
+final_data <- cbind(top_genes, er_status_binary)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "60HVgenes_ERStatus.csv", row.names = FALSE)
+```
+
+```{r}
+survival_months <- METABRIC_Data$overall_survival_months
+final_data <- cbind(top_genes, survival_months, age)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "60HVgenes_AgeSurvival.csv", row.names = FALSE)
+```
+
+# Sélection de toutes les features précédentes
+
+```{r}
+final_data <- cbind(top_genes, cancer_type_binary, age, cellularity_binary, er_status_binary, survival_months)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "60HVgenes_All.csv", row.names = FALSE)
+```
+
+# Exploration du graphe avec les 31 premières features
+
+```{r}
+convert_column_to_binary_with_newnames <- function(column, new_name){
+    "Convertit un vecteur en une matrice remplie de zeros et de uns et ajoute le nom de la classe parente aux colonnes créer"
+    class <- unique(na.omit(column)) 
+    new_columns <- matrix(0, nrow = length(column), ncol = length(class))
+    colnames(new_columns) <- paste(new_name, class) #mettre dans le header les types de cancer
+    
+    for (i in 1:length(column)){
+        if (!is.na(column[i])){ 
+            for (j in 1:length(class)){
+                if (column[i] == class[j]){
+                    new_columns[i, j] <- 1
+                }
+            }
+        }
+    }
+    return(new_columns)
+}
+
+cancer_type_binary <- convert_column_to_binary(METABRIC_Data$cancer_type_detailed)
+cellularity_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$cellularity, "cellularity ")
+er_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$er_status, "ER status ")
+her2_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$her2_status, "HER2 status ")
+menopause_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$inferred_menopausal_state, "Menopause ")
+tumor_laterality_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$primary_tumor_laterality, "Tumor Laterality ")
+
+useful_features <- METABRIC_Data[, c("age_at_diagnosis", "chemotherapy", "neoplasm_histologic_grade", "hormone_therapy", "lymph_nodes_examined_positive", "mutation_count", "overall_survival_months", "pr_status", "radio_therapy", "tumor_size", "tumor_stage")]
+final_data <- cbind(useful_features, cancer_type_binary, cellularity_binary, er_status_binary, her2_status_binary, menopause_binary, tumor_laterality_binary)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "AllFirstFeatures", row.names = FALSE)
+```
+
+# Sélection intelligente des features (découpage)
+
+```{r}
+gene_expression_data <- METABRIC_Data[, 32:520]
+
+n <- ncol(gene_expression_data)
+subset_size <- ceiling(n / 10)  #taille approximative de chaque sous-tableau
+subsets <- list()
+
+for (i in 1:10) { #découpage des colonnes d'expression en 10
+  start <- (i - 1) * subset_size + 1
+  end <- min(i * subset_size, n)  #assure que l'index de fin ne dépasse pas le nombre de lignes
+  subsets[[i]] <- gene_expression_data[, start:end]
+}
+
+
+lapply(subsets, dim)
+
+```
+
+```{r}
+check_if_name_in_it <- function(name) {
+  for (tab in 1:10){
+    gene_expressions <- subsets[[tab]]
+    if (name %in% colnames(gene_expressions)){
+      print(paste(name, " présent dans la colonne ", tab))
+    }
+  }
+}
+
+check_if_name_in_it("brca1")
+check_if_name_in_it("brca2")
+check_if_name_in_it("tp53")
+```
+
+```{r}
+T = 10
+```
+
+
+```{r}
+for (tab in 1:10){
+  if (tab == T){ #gènes d'intérêt présents dans le premier tableau
+    gene_expressions <- subsets[[tab]]
+    death_binary <- convert_column_to_binary(METABRIC_Data$death_from_cancer)
+    final_data <- cbind(METABRIC_Data$overall_survival, METABRIC_Data$overall_survival_months, death_binary, METABRIC_Data$nottingham_prognostic_index, gene_expressions)
+    final_data <- remplacer_na(final_data)
+    write.csv(final_data, paste("SurviveFeatures",T,".csv"), row.names = FALSE)
+    }
+}
+```
+
+```{r}
+for (tab in 1:10){
+  if (tab == T){ #gènes d'intérêt présents dans le premier tableau
+    gene_expressions <- subsets[[tab]]
+    cancer_binary <- convert_column_to_binary(METABRIC_Data$type_of_breast_surgery)
+    final_data <- cbind(METABRIC_Data$chemotherapy, METABRIC_Data$hormone_therapy, METABRIC_Data$radio_therapy, cancer_binary, gene_expressions)
+    final_data <- remplacer_na(final_data)
+    write.csv(final_data, paste("RepTraitement",T,".csv"), row.names = FALSE)
+    }
+}
+```
+
+```{r}
+for (tab in 1:10){
+  if (tab == T){ #gènes d'intérêt présents dans le premier tableau
+    gene_expressions <- subsets[[tab]]
+    pam <- convert_column_to_binary(METABRIC_Data$`pam50_+_claudin-low_subtype`)
+    clust <- convert_column_to_binary_with_newnames(METABRIC_Data$integrative_cluster, "Cluster ")
+    er_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$er_status, "ER status ")
+    her2_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$her2_status, "HER2 status ")
+    pr_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$pr_status, "PR status ")
+    final_data <- cbind(METABRIC_Data$mutation_count, pam, clust, er_status_binary, her2_status_binary, pr_status_binary, gene_expressions)
+    final_data <- remplacer_na(final_data)
+    write.csv(final_data, paste("CaractGenEtMarqueursBio",T,".csv"), row.names = FALSE)
+    }
+}
+```
+
+```{r}
+for (tab in 1:10){
+  if (tab == T){ #gènes d'intérêt présents dans le premier tableau
+    gene_expressions <- subsets[[tab]]
+    final_data <- cbind(METABRIC_Data$age_at_diagnosis, METABRIC_Data$neoplasm_histologic_grade, METABRIC_Data$tumor_stage, METABRIC_Data$tumor_size, METABRIC_Data$lymph_nodes_examined_positive, gene_expressions)
+    final_data <- remplacer_na(final_data)
+    write.csv(final_data, paste("FactCliniquePatho",T,".csv"), row.names = FALSE)
+    }
+}
+```
+
+```{r}
+for (tab in 1:10){
+  if (tab == T){ #gènes d'intérêt présents dans le premier tableau
+    gene_expressions <- subsets[[tab]]
+    cancer_type <- convert_column_to_binary(METABRIC_Data$cancer_type_detailed)
+    histo_type <- convert_column_to_binary_with_newnames(METABRIC_Data$tumor_other_histologic_subtype, "Histo Type ")
+    profil <- convert_column_to_binary_with_newnames(METABRIC_Data$`3-gene_classifier_subtype`, "Profil ")
+    final_data <- cbind(cancer_type, histo_type, profil, gene_expressions)
+    write.csv(final_data, paste("ClassTumeur",T,".csv"), row.names = FALSE)
+    }
+}
+```
+
+# Choisir les gènes les plus connectés aux features principales
+
+```{r}
+genes_of_interest <- METABRIC_Data[, c("ccne1", "pten", "rb1", "e2f2", "bard1", "cdk6", "cdk4", "jak1", "myc", "ccnd1", "mlh1", "e2f4", "numb", "aph1b", "ep300", "stat3", "stat5a", "psen1", "dtx2", "adam17", "notch1","dtx3", "arrdc1", "mdm2", "aurka", "bcl2", "casp10", "casp8", "chek1", "bmp2", "bad", "bmpr1b", "bmp6", "bmp5", "inhba", "kit", "gsk3b", "erbb2", "diras3", "igf1r", "dlec1", "egfr", "mapk14", "map3k5", "map2k2", "kras", "mmp12", "rheb", "rad51", "ptk2", "pdgfra", "pdpk1", "mmp15", "mmp7", "mapk3", "mapk6", "mapk9", "mmp28", "pik3r1", "gata3", "slc19a1", "runx1", "tsc1", "kmt2c", "abcb1", "smad2", "tgfb2", "wwox", "tgfb3", "rps6kb2", "map4", "arid5b", "mapt", "ahnak", "bap1", "dtwd2", "cyp2c8", "cacna2d3", "lamb3", "lama2", "flt3", "nras", "ncoa3", "fancd2", "npnt", "frmd3", "kdm6a", "muc16", "ppp2r2a", "mtap", "nt5e", "nek1", "gps2", "prkcq", "cdkn2c", "ar", "cdk8", "rpgr", "ptprm", "sf3b1", "cyb5a", "smarcc2", "smarcb1", "hes6", "cyp21a2", "srd5a1", "hsd17b11", "rdh5", "hsd17b2", "hsd17b4", "spry2", "sdc4", "tulp4", "nrip1", "hsd17b10", "hsd17b8")]
+
+death_binary <- convert_column_to_binary(METABRIC_Data$death_from_cancer)
+final_data <- cbind(METABRIC_Data$overall_survival, METABRIC_Data$overall_survival_months, death_binary, METABRIC_Data$nottingham_prognostic_index, genes_of_interest)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "FinalSurviveFeaturesV2.csv", row.names = FALSE)
+
+cancer_binary <- convert_column_to_binary(METABRIC_Data$type_of_breast_surgery)
+final_data <- cbind(METABRIC_Data$chemotherapy, METABRIC_Data$hormone_therapy, METABRIC_Data$radio_therapy, cancer_binary, genes_of_interest)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "FinalRepTraitement.csv", row.names = FALSE)
+
+final_data <- cbind(METABRIC_Data$age_at_diagnosis, METABRIC_Data$neoplasm_histologic_grade, METABRIC_Data$tumor_stage, METABRIC_Data$tumor_size, METABRIC_Data$lymph_nodes_examined_positive, genes_of_interest)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, "FinalFactCliniquePatho.csv", row.names = FALSE)
+
+pam <- convert_column_to_binary(METABRIC_Data$`pam50_+_claudin-low_subtype`)
+clust <- convert_column_to_binary_with_newnames(METABRIC_Data$integrative_cluster, "Cluster ")
+er_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$er_status, "ER status ")
+her2_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$her2_status, "HER2 status ")
+pr_status_binary <- convert_column_to_binary_with_newnames(METABRIC_Data$pr_status, "PR status ")
+final_data <- cbind(METABRIC_Data$mutation_count, pam, clust, er_status_binary, her2_status_binary, pr_status_binary, gene_expressions)
+final_data <- remplacer_na(final_data)
+write.csv(final_data, paste("FinalCaractGenEtMarqueursBio.csv"), row.names = FALSE)
+```
+
+```{r}
+genes_in_graph <- colnames(genes_of_interest)
+
+gene_to_test <- "nras"
+print(gene_to_test %in% genes_in_graph)
+```
+
+
+
+
+
+
+
+
+
+
+
+

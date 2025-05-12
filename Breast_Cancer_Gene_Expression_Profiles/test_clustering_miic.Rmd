@@ -1,0 +1,60 @@
+---
+title: "Miic_Network"
+output: html_document
+date: "2024-11-08"
+---
+
+```{r}
+library(igraph)
+```
+
+```{r}
+df <- read.table(file = "Miic_networks/Mutations_without_count_11_08_2024_06_19_33_pm/adjacencyMatrix.miic.txt", sep = '\t', header = TRUE)
+
+edges_df <- read.table(file = "Miic_networks/Mutations_without_count_11_08_2024_06_19_33_pm/edgesList.miic.summary.txt", sep = '\t', header = TRUE)
+
+```
+
+
+Dans le fichier contenant la liste des edges, je compte le nombre d'edges dont la probabilité est supérieure à un seuil pour voir le nombre d'edges que je pourrais retirer.
+Ensuite: Utiliser cette boucle pour retirer les edges en dessous du seuil.
+```{r}
+seuil = 0.5
+count = 0
+for (string in edges_df$proba) {
+
+  if (as.numeric(strsplit(string,";")[[1]][1]) > seuil) {
+    count = count + 1
+  }
+  if (as.numeric(strsplit(string,";")[[1]][2]) > seuil) {
+    count = count + 1
+  }
+}
+count
+```
+Création du graph à partir de la matrice d'adjacence obtenue avec Miic.
+```{r}
+graph <- graph_from_adjacency_matrix(
+  as.matrix(df),
+  "undirected",
+)
+cat("Number of edges:",sum(as.matrix(df)))
+plot(graph)
+```
+Les méthodes de clustering de igraph ne fonctionnent pas avec des poids négatifs, ce qui nous pousse à utiliser l'arbre non orienté de Miic, il est apparemment possible de rescale les poids pour n'en avoir que des positifs mais je n'ai pas encore creusé.
+
+Méthodes de clustering possibles:
+```{r}
+clusters <- cluster_edge_betweenness(graph)
+#clusters <- cluster_walktrap(graph)
+#clusters <- cluster_louvain(graph)
+#clusters <- cluster_label_prop(graph)
+#clusters <- cluster_infomap(graph)
+
+# View clusters
+membership(clusters)   # Shows which cluster each node belongs to
+sizes(clusters)        # Shows the size of each cluster
+
+
+```
+

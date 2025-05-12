@@ -1,0 +1,591 @@
+---
+title: "RESYS Project: Breast Cancer Gene Expression Profiles (METABRIC)"
+author: "Océane Li"
+date: "2024-11-10"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+```
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv")
+head(BC_data)
+```
+
+
+## Features
+
+```{r}
+# 30 features
+features <- BC_data[, 2:31]
+write.csv(features, "features_R.csv", row.names = FALSE)
+head(features)
+```
+
+
+## Les 173 mutations
+
+```{r}
+mut_brut <- BC_data %>% select(contains("_mut"))
+write.csv(mut_brut, "mutations_brut_R.csv", row.names = FALSE)
+mut_brut <- read.csv("mutations_brut_R.csv")
+
+# Missing values
+missing_values <- colSums(is.na(mut_brut))
+missing_values <- missing_values[missing_values > 0]
+cat("Colonnes avec des valeurs manquantes :\n")
+print(missing_values)
+```
+Il n'y a aucune valeur manquante dans les 173 mutations.
+
+
+```{r}
+# 1. Extraire toutes les mutations
+mut_data <- BC_data %>% select(contains("_mut"))
+
+# 2. Convertir les "str" des mutations en 1 (int)
+mut_columns <- colnames(mut_data)
+for (col in mut_columns) {
+  mut_data[[col]] <- sapply(mut_data[[col]], function(x) {
+    if (is.character(x) && x != "0") {
+      return(1)
+    } else if (x == "0" || x == 0) {
+      return(0)
+    } else {
+      return(x)
+    }
+  })
+}
+
+write.csv(mut_data, "mutations_R.csv", row.names = FALSE)
+head(mut_data)
+```
+
+
+## Survie du patient
+
+```{r}
+# Données brutes
+prog_cancer <- BC_data %>%
+  select(
+    overall_survival_months,
+    overall_survival,
+    death_from_cancer,
+    nottingham_prognostic_index
+  )
+
+prog_brut <- cbind(prog_cancer, mut_data)
+write.csv(prog_brut, "survie_brut_R.csv", row.names = FALSE)
+
+prog_brut <- read.csv("survie_brut_R.csv", na.strings = c("", ",,"))
+missing_values <- colSums(is.na(prog_brut))
+missing_values <- missing_values[missing_values > 0]
+cat("Colonnes avec des valeurs manquantes :\n")
+print(missing_values)
+prog_brut <- na.omit(prog_brut)
+write.csv(prog_brut, "survie_brut_R.csv", row.names = FALSE)
+```
+
+Il y a une valeur manquante dans "death_from_cancer".
+
+
+```{r}
+# Traitement des valeurs manquantes
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv", na.strings = c("", ",,"))
+
+na_row <- which(is.na(BC_data$death_from_cancer))
+BC_data <- BC_data[-na_row, ]
+```
+
+
+```{r}
+# "overall_survival_months"
+months <- BC_data$overall_survival_months
+
+max_months <- max(months, na.rm = TRUE)
+min_months <- min(months, na.rm = TRUE)
+mean_months <- mean(months, na.rm = TRUE)
+median_months <- median(months, na.rm = TRUE)
+max_count <- sum(months == max_months, na.rm = TRUE)
+min_count <- sum(months == min_months, na.rm = TRUE)
+
+cat("Max survie:", max_months, "Effectif:", max_count, "\n")
+cat("Min survie:", min_months, "Effectif:", min_count, "\n")
+cat("Mean survie:", mean_months, "\n")
+cat("Median survie:", median_months, "\n")
+```
+La moyenne de survie des patientes est de environ 125 mois, soit un peu plus de 10 ans. Cela indique que, en moyenne, les patientes survivent environ 10 ans après un traitement contre le cancer (intervention). La médiane de survie est de 115.6 mois, soit environ 9.6 ans. Cela signifie que la moitié des patientes a survécu plus de 9.6 ans, et l'autre moitié a survécu moins de cette durée.
+
+Nous allons diviser ces mois de survie après intervention en 4 intervalles.
+
+```{r}
+months_data <- data.frame(
+  survival_less_12_months = ifelse(months < 12, 1, 0),
+  survival_12_24_months = ifelse(months >= 12 & months < 24, 1, 0),
+  survival_24_60_months = ifelse(months >= 24 & months < 60, 1, 0),
+  survival_60_120_months = ifelse(months >= 60 & months < 120, 1, 0),
+  survival_more_120_months = ifelse(months >= 120, 1, 0)
+)
+
+head(months_data)
+```
+
+
+```{r}
+# "overall_survival"
+# 1 = survie ; 0 = death
+survie_data <- data.frame(overall_survival = BC_data$overall_survival)
+
+survie_data$overall_Alive <- ifelse(survie_data$overall_survival > 0, 1, 0)
+survie_data$overall_Dead <- ifelse(survie_data$overall_survival == 0, 1, 0)
+survie_data$overall_survival <- NULL
+
+head(survie_data)
+```
+
+
+```{r}
+# "death_from_cancer"
+death_reason <- unique
+
+BC_data$Living <- ifelse(BC_data$death_from_cancer == "Living", 1, 0)
+BC_data$Died_of_Disease <- ifelse(BC_data$death_from_cancer == "Died of Disease", 1, 0)
+BC_data$Died_of_Other_Causes <- ifelse(BC_data$death_from_cancer == "Died of Other Causes", 1, 0)
+
+death_data <- BC_data[, c("Living", "Died_of_Disease", "Died_of_Other_Causes")]
+
+head(death_data)
+```
+
+
+```{r}
+# "nottingham_prognostic_index"
+nottingham_prognostic_index <- BC_data$nottingham_prognostic_index
+nottingham <- as.data.frame(nottingham_prognostic_index)
+head(nottingham)
+```
+
+Le Nottingham Prognostic Index (NPI) est un indice utilisé pour prédire le pronostic des patientes atteintes du cancer du sein, notamment après une intervention chirurgicale. Il est basé sur trois critères pathologiques essentiels :
+
+- La taille de la tumeur : un indicateur de l'ampleur du cancer, car une tumeur plus grande peut être associée à une probabilité plus élevée de propagation à d'autres parties du corps.
+- Le nombre de ganglions lymphatiques impliqués : les ganglions lymphatiques servent de filtres dans le système lymphatique, et la présence de cancer dans ces ganglions est un facteur clé pour évaluer le stade de la maladie. Plus il y a de ganglions lymphatiques atteints, plus le cancer est susceptible de s'être propagé.
+- Le grade de la tumeur : il fait référence à l'apparence des cellules tumorales sous microscope et indique leur agressivité. Un grade plus élevé signifie généralement que les cellules cancéreuses sont plus anormales et plus susceptibles de se développer rapidement.
+
+Le NPI permet de classer les patientes en différentes catégories de pronostic (bon, moyen, mauvais) selon la valeur calculée. Les seuils couramment utilisés dans la littérature pour le NPI sont les suivants :
+
+- NPI < 3.4 : Pronostic très favorable (Bon pronostic)
+- 3.4 ≤ NPI < 5.4 : Pronostic modéré
+- NPI ≥ 5.4 : Pronostic mauvais (Mauvais pronostic)
+
+[ref] *Galea MH, Blamey RW, Elston CE, Ellis IO. The Nottingham Prognostic Index in primary breast cancer. Breast Cancer Res Treat. 1992;22(3):207-19. doi: 10.1007/BF01840834. PMID: 1391987.*
+
+
+```{r}
+nottingham$nottingham_bon_pronostic <- ifelse(nottingham$nottingham_prognostic_index < 3.4, 1, 0)
+nottingham$nottingham_pronostic_modéré <- ifelse(nottingham$nottingham_prognostic_index >= 3.4 & nottingham$nottingham_prognostic_index < 5.4, 1, 0)
+nottingham$nottingham_mauvais_pronostic <- ifelse(nottingham$nottingham_prognostic_index >= 5.4, 1, 0)
+
+nottingham_data <- nottingham[, !colnames(nottingham) %in% "nottingham_prognostic_index"]
+
+head(nottingham_data)
+```
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv", na.strings = c("", ",,"))
+na_row <- which(is.na(BC_data$death_from_cancer))
+mut_data <- mut_data[-na_row, ]
+```
+
+
+```{r}
+nrow(months_data)
+nrow(survie_data)
+nrow(death_data)
+nrow(nottingham_data)
+nrow(mut_data)
+```
+
+
+```{r}
+survie <- bind_cols(months_data, survie_data, death_data, nottingham_data, mut_data)
+write.csv(survie, "survie_R.csv", row.names = FALSE)
+
+head(survie)
+```
+
+
+
+## Types de traitement
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv")
+mut_data <- BC_data %>% select(contains("_mut"))
+mut_columns <- colnames(mut_data)
+for (col in mut_columns) {
+  mut_data[[col]] <- sapply(mut_data[[col]], function(x) {
+    if (is.character(x) && x != "0") {
+      return(1)
+    } else if (x == "0" || x == 0) {
+      return(0)
+    } else {
+      return(x)
+    }
+  })
+}
+```
+
+
+```{r}
+# Données brutes :
+treatment <- BC_data[, c("chemotherapy", "hormone_therapy", "radio_therapy", "type_of_breast_surgery")]
+treatment_brut <- cbind(treatment, mut_data)
+
+write.csv(treatment_brut, "treatment_brut_R.csv", row.names = FALSE)
+treatment_brut <- read.csv("treatment_brut_R.csv", na.strings = c("", ",,"))
+missing_values <- colSums(is.na(treatment_brut))
+missing_values <- missing_values[missing_values > 0]
+cat("Colonnes avec des valeurs manquantes :\n")
+print(missing_values)
+treatment_brut <- na.omit(treatment_brut)
+write.csv(treatment_brut, "treatment_brut_R.csv", row.names = FALSE)
+```
+
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv", na.strings = c("", ",,"))
+na_row <- which(is.na(BC_data$type_of_breast_surgery))
+mut_data <- mut_data[-na_row, ]
+```
+
+
+
+```{r}
+# Chimiothérapie
+chemotherapy <- treatment_brut[["chemotherapy"]]
+chemo <- as.data.frame(chemotherapy)
+head(chemo)
+
+# Hormone Therapy
+hormone_therapy <- treatment_brut[["hormone_therapy"]]
+hormone <- as.data.frame(hormone_therapy)
+head(hormone)
+
+# Radio Therapy
+radio_therapy <- treatment_brut[["radio_therapy"]]
+radio <- as.data.frame(radio_therapy)
+head(radio)
+
+# Chirurgie
+# mastectomie vs conservation du sein
+surgery <- treatment_brut[["type_of_breast_surgery"]]
+surgery <- as.data.frame(surgery)
+surg_types <- unique(surgery$surgery)
+for (surg in surg_types) {
+  surgery[[surg]] <- ifelse(surgery$surgery == surg, 1, 0)
+}
+surgery <- surgery[, !colnames(surgery) %in% "surgery"]
+
+head(surgery)
+```
+
+```{r}
+nrow(chemo)
+nrow(hormone)
+nrow(radio)
+nrow(surgery)
+nrow(mut_data)
+```
+
+
+```{r}
+treatment_response <- cbind(chemo, hormone, radio, surgery, mut_data)
+
+write.csv(treatment_response, "treatment_R.csv", row.names = FALSE)
+```
+
+
+
+## Facteurs cliniques et pathologiques
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv")
+mut_data <- BC_data %>% select(contains("_mut"))
+mut_columns <- colnames(mut_data)
+for (col in mut_columns) {
+  mut_data[[col]] <- sapply(mut_data[[col]], function(x) {
+    if (is.character(x) && x != "0") {
+      return(1)
+    } else if (x == "0" || x == 0) {
+      return(0)
+    } else {
+      return(x)
+    }
+  })
+}
+```
+
+
+
+```{r}
+# Données brutes :
+clinical_features <- BC_data[
+  c(
+    "age_at_diagnosis", 
+    "tumor_stage", 
+    "tumor_size", 
+    "lymph_nodes_examined_positive", 
+    "neoplasm_histologic_grade"
+  )
+]
+
+clinical_brut <- cbind(clinical_features, mut_data)
+write.csv(clinical_brut, "clinical_brut_R.csv", row.names = FALSE)
+clinical_brut <- read.csv("clinical_brut_R.csv")
+missing_values <- colSums(is.na(clinical_brut))
+missing_values <- missing_values[missing_values > 0]
+cat("Colonnes avec des valeurs manquantes :\n")
+print(missing_values)
+clinical_brut <- na.omit(clinical_brut)
+write.csv(clinical_brut, "clinical_brut_R.csv", row.names = FALSE)
+```
+
+```{r}
+# Age au diagnostic
+age <- clinical_brut$age_at_diagnosis
+age_data <- data.frame(
+  age_40 <- as.integer(age < 40),
+  age_40_49 <- as.integer(age >= 40 & age < 50),
+  age_50_64 <- as.integer(age >= 50 & age < 65),
+  age_65_plus <- as.integer(age >= 65)
+)
+
+head(age_data)
+
+# Stade du cancer
+tumor_stage <- clinical_brut[, "tumor_stage", drop = FALSE]
+head(tumor_stage)
+
+# Taille de la tumeur
+tumor_size <- clinical_brut[, "tumor_size", drop = FALSE]
+head(tumor_size)
+
+# Nombre de ganglions lymphatiques impliqués par le cancer
+lymph_nodes <- clinical_brut[, "lymph_nodes_examined_positive", drop = FALSE]
+head(lymph_nodes)
+
+# Grade histologique de la tumeur (agressivité du cancer)
+# int (1 à 3)
+hist_grade <- clinical_brut[, "neoplasm_histologic_grade", drop = FALSE]
+head(hist_grade)
+```
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv", na.strings = c("", ",,"))
+na_rows <- which(is.na(BC_data$tumor_stage) | 
+                 is.na(BC_data$tumor_size) | 
+                 is.na(BC_data$neoplasm_histologic_grade))
+mut_data <- mut_data[-na_rows, ]
+```
+
+
+```{r}
+nrow(age_data)
+nrow(tumor_stage)
+nrow(tumor_size)
+nrow(lymph_nodes)
+nrow(hist_grade)
+nrow(mut_data)
+```
+
+
+```{r}
+clinical <- cbind(age_data, tumor_stage, tumor_size, lymph_nodes, hist_grade, mut_data)
+
+write.csv(clinical, "clinical_R.csv", row.names = FALSE)
+```
+
+
+
+
+## Classification tumorale
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv")
+mut_data <- BC_data %>% select(contains("_mut"))
+mut_columns <- colnames(mut_data)
+for (col in mut_columns) {
+  mut_data[[col]] <- sapply(mut_data[[col]], function(x) {
+    if (is.character(x) && x != "0") {
+      return(1)
+    } else if (x == "0" || x == 0) {
+      return(0)
+    } else {
+      return(x)
+    }
+  })
+}
+```
+
+
+
+
+```{r}
+# Données brutes :
+classes <- BC_data[, c("cancer_type_detailed", "tumor_other_histologic_subtype", "X3.gene_classifier_subtype")]
+classes_brut <- cbind(classes, mut_data)
+write.csv(classes_brut, "classes_brut_R.csv", row.names = FALSE)
+
+classes_brut <- read.csv("classes_brut_R.csv", na.strings = c("", ",,"))
+missing_values <- colSums(is.na(classes_brut))
+missing_values <- missing_values[missing_values > 0]
+cat("Colonnes avec des valeurs manquantes :\n")
+print(missing_values)
+classes_brut <- na.omit(classes_brut)
+write.csv(classes_brut, "classes_brut_R.csv", row.names = FALSE)
+```
+
+
+```{r}
+# Cancer type detailed
+cancers <- classes_brut[["cancer_type_detailed"]]
+cancers <- as.data.frame(cancers)
+cancer_types <- unique(cancers$cancers)
+for (c in cancer_types) {
+  cancers[[c]] <- ifelse(cancers$cancers == c, 1, 0)
+}
+cancers <- cancers[, !colnames(cancers) %in% "cancers"]
+head(cancers)
+
+# Sous-types histologiques détaillés
+histo_subtype <- classes_brut[["tumor_other_histologic_subtype"]]
+histo_subtype <- as.data.frame(histo_subtype)
+histo <- unique(histo_subtype$histo_subtype)
+for (h in histo) {
+  histo_subtype[[h]] <- ifelse(histo_subtype$histo_subtype == h, 1, 0)
+}
+histo_subtype <- histo_subtype[, !colnames(histo_subtype) %in% "histo_subtype"]
+head(histo_subtype)
+
+# Classification des 3 gènes
+gene3 <- classes_brut[["X3.gene_classifier_subtype"]]
+gene3 <- as.data.frame(gene3)
+three <- unique(gene3$gene3)
+for (t in three) {
+  gene3[[t]] <- ifelse(gene3$gene3 == t, 1, 0)
+}
+gene3 <- gene3[, !colnames(gene3) %in% "gene3"]
+head(gene3)
+```
+
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv", na.strings = c("", ",,"))
+na_rows <- which(is.na(BC_data$cancer_type_detailed) | 
+                 is.na(BC_data$tumor_other_histologic_subtype) | 
+                 is.na(BC_data$X3.gene_classifier_subtype))
+mut_data <- mut_data[-na_rows, ]
+```
+
+
+```{r}
+nrow(cancers)
+nrow(histo_subtype)
+nrow(gene3)
+nrow(mut_data)
+```
+
+```{r}
+classes <- cbind(cancers, histo_subtype, gene3, mut_data)
+write.csv(classes, "classes_R.csv", row.names = FALSE)
+```
+
+
+
+
+## Les récepteurs hormonaux
+
+```{r}
+BC_data <- read.csv("METABRIC_RNA_Mutation.csv")
+mut_data <- BC_data %>% select(contains("_mut"))
+mut_columns <- colnames(mut_data)
+for (col in mut_columns) {
+  mut_data[[col]] <- sapply(mut_data[[col]], function(x) {
+    if (is.character(x) && x != "0") {
+      return(1)
+    } else if (x == "0" || x == 0) {
+      return(0)
+    } else {
+      return(x)
+    }
+  })
+}
+```
+
+
+```{r}
+# Données brutes :
+receptors <- BC_data[, c("er_status", "her2_status", "pr_status")]
+receptors_brut <- cbind(receptors, mut_data)
+write.csv(receptors_brut, "receptors_brut_R.csv", row.names = FALSE)
+
+receptors_brut <- read.csv("receptors_brut_R.csv", na.strings = c("", ",,"))
+missing_values <- colSums(is.na(receptors_brut))
+missing_values <- missing_values[missing_values > 0]
+cat("Colonnes avec des valeurs manquantes :\n")
+print(missing_values)
+receptors_brut <- na.omit(receptors_brut)
+write.csv(receptors_brut, "receptors_brut_R.csv", row.names = FALSE)
+```
+
+
+```{r}
+# Récepteurs oestrogènes
+er_receptor <- receptors_brut["er_status"]
+er_receptor <- as.data.frame(er_receptor)
+er_receptor$er_status <- ifelse(er_receptor$er_status == "Positive", 1, 0)
+head(er_receptor)
+
+# Récepteurs HER2
+her2 <- receptors_brut["her2_status"]
+her2 <- as.data.frame(her2)
+her2$her2_status <- ifelse(her2$her2_status == "Positive", 1, 0)
+head(her2)
+
+# Récepteurs progestérone
+pr_receptor <- receptors_brut["pr_status"]
+pr_receptor <- as.data.frame(pr_receptor)
+pr_receptor$pr_status <- ifelse(pr_receptor$pr_status == "Positive", 1, 0)
+head(pr_receptor)
+```
+
+```{r}
+nrow(er_receptor)
+nrow(her2)
+nrow(pr_receptor)
+nrow(mut_data)
+```
+
+
+```{r}
+receptors <- cbind(er_receptor, her2, pr_receptor, mut_data)
+write.csv(receptors, "receptors_R.csv", row.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
